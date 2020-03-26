@@ -23,11 +23,14 @@
 
 #include "cyber/common/file.h"
 #include "modules/canbus/proto/chassis.pb.h"
+#include "modules/dreamview/proto/hmi_status.pb.h"
+#include "modules/map/hdmap/hdmap_common.h"
 #include "modules/localization/proto/localization.pb.h"
-#include "modules/perception/proto/perception_obstacle.pb.h"
 #include "modules/perception/proto/traffic_light_detection.pb.h"
+#include "modules/prediction/proto/prediction_obstacle.pb.h"
 #include "modules/planning/proto/learning_data.pb.h"
 #include "modules/routing/proto/routing.pb.h"
+#include "modules/storytelling/proto/story.pb.h"
 
 namespace apollo {
 namespace planning {
@@ -40,21 +43,50 @@ class FeatureGenerator {
   void ProcessOfflineData(const std::string& record_filename);
 
  private:
+  struct ADCCurrentInfo {
+    std::pair<double, double> adc_cur_position_;
+    std::pair<double, double> adc_cur_velocity_;
+    std::pair<double, double> adc_cur_acc_;
+    double adc_cur_heading_;
+  };
+
   void OnChassis(const apollo::canbus::Chassis& chassis);
+  void OnHMIStatus(apollo::dreamview::HMIStatus hmi_status);
   void OnLocalization(const apollo::localization::LocalizationEstimate& le);
-  void OnPerceptionObstacle(
-      const apollo::perception::PerceptionObstacles& perception_obstacles);
+  void OnPrediction(
+      const apollo::prediction::PredictionObstacles& prediction_obstacles);
   void OnRoutingResponse(
       const apollo::routing::RoutingResponse& routing_response);
+  void OnStoryTelling(const apollo::storytelling::Stories& stories);
   void OnTafficLightDetection(
       const apollo::perception::TrafficLightDetection& traffic_light_detection);
 
-  void GenerateObstacleData(LearningDataFrame* learning_data_frame);
+  apollo::hdmap::LaneInfoConstPtr GetADCCurrentLane(int* routing_index);
+
+  void GetADCCurrentInfo(ADCCurrentInfo* adc_curr_info);
+
+  void GenerateObstacleTrajectoryPoint(
+      const int obstacle_id,
+      const ADCCurrentInfo& adc_curr_info,
+      ObstacleFeature* obstacle_feature);
+
+  void GenerateObstaclePrediction(
+      const apollo::prediction::PredictionObstacle& prediction_obstacle,
+      const ADCCurrentInfo& adc_curr_info,
+      ObstacleFeature* obstacle_feature);
+
+  void GenerateObstacleFeature(LearningDataFrame* learning_data_frame);
+
+  void GenerateRoutingFeature(const int routing_index,
+                              LearningDataFrame* learning_data_frame);
 
   void GenerateADCTrajectoryPoints(
       const std::list<apollo::localization::LocalizationEstimate>&
           localization_for_label,
       LearningDataFrame* learning_data_frame);
+
+  void GeneratePlanningTag(const apollo::hdmap::LaneInfoConstPtr& cur_lane,
+                           LearningDataFrame* learning_data_frame);
 
   void GenerateLearningDataFrame();
 
@@ -62,16 +94,20 @@ class FeatureGenerator {
                             const std::string& file_name);
 
  private:
+  std::unordered_map<std::string, std::string> map_m_;
   LearningData learning_data_;
   int learning_data_file_index_ = 0;
   std::list<apollo::localization::LocalizationEstimate>
       localization_for_label_;
-  std::unordered_map<int, apollo::perception::PerceptionObstacle>
-      perception_obstacles_map_;
-  std::unordered_map<int, std::list<ObstacleTrajectoryPoint>>
+
+  std::unordered_map<int, apollo::prediction::PredictionObstacle>
+      prediction_obstacles_map_;
+  std::unordered_map<int, std::list<PerceptionObstacleFeature>>
       obstacle_history_map_;
   ChassisFeature chassis_feature_;
-  std::vector<std::string> routing_lane_ids_;
+  std::string map_name_;
+  std::vector<OverlapFeature> overlaps_;
+  std::vector<std::pair<std::string, double>> routing_lane_segment_;
   std::unordered_map<std::string, apollo::perception::TrafficLight::Color>
         traffic_lights_;
   int total_learning_data_frame_num_ = 0;

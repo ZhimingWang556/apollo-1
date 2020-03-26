@@ -5,9 +5,31 @@ package apollo.planning;
 import "modules/canbus/proto/chassis.proto";
 import "modules/common/proto/geometry.proto";
 import "modules/common/proto/pnc_point.proto";
+import "modules/map/proto/map_lane.proto";
 import "modules/perception/proto/perception_obstacle.proto";
+import "modules/prediction/proto/feature.proto";
+import "modules/prediction/proto/prediction_obstacle.proto";
 import "modules/perception/proto/traffic_light_detection.proto";
-import "modules/routing/proto/routing.proto";
+import "modules/planning/proto/planning_config.proto";
+
+message OverlapFeature {
+  enum OverlapType {
+    CLEAR_AREA = 1;
+    CROSSWALK = 2;
+    PNC_JUNCTION = 3;
+    STOP_SIGN = 4;
+    TRAFFIC_LIGHT = 5;
+    YIELD_SIGN = 6;
+  };
+  optional string id = 1;
+  optional OverlapType type = 2;
+  optional double distance = 3;
+}
+
+message PlanningTag {
+  optional apollo.hdmap.Lane.LaneTurn lane_turn = 1;
+  repeated OverlapFeature overlap = 2;
+}
 
 message ChassisFeature {
   // Features from chassis
@@ -52,7 +74,8 @@ message LocalizationFeature {
   optional apollo.common.Point3D angular_velocity = 5;
 }
 
-message ObstacleTrajectoryPoint {
+// based on apollo.perception.PerceptionObstacle
+message PerceptionObstacleFeature {
   optional double timestamp_sec = 1;
 
   // obstacle position in the OBJECT coordinate system
@@ -64,11 +87,58 @@ message ObstacleTrajectoryPoint {
   // obstacle velocity in RELATIVE coordinate to ADC
   optional apollo.common.Point3D velocity = 4;  // obstacle velocity
 
-  // obstacle corner points in RELATIVE coordinate to ADC
-  repeated apollo.common.Point3D polygon_point = 5;
-
   // obstacle acceleration in RELATIVE coordinate to ADC
-  optional apollo.common.Point3D acceleration = 6;
+  optional apollo.common.Point3D acceleration = 5;
+
+  // obstacle corner points in RELATIVE coordinate to ADC
+  repeated apollo.common.Point3D polygon_point = 6;
+}
+
+// based on apollo.common.PathPoint
+message PathPointFeature {
+  // coordinates
+  optional double x = 1;
+  optional double y = 2;
+  optional double z = 3;
+
+  // direction on the x-y plane
+  optional double theta = 4;
+  // accumulated distance from beginning of the path
+  optional double s = 5;
+  // The lane ID where the path point is on
+  optional string lane_id = 6;
+}
+
+// based on apollo.commom.TrajectoryPoint
+message TrajectoryPointFeature {
+  // path point
+  optional PathPointFeature path_point = 1;
+  // linear velocity
+  optional double v = 2;  // in [m/s]
+  // linear acceleration
+  optional double a = 3;
+  // relative time from beginning of the trajectory
+  optional double relative_time = 4;
+  // Gaussian probability information
+  optional apollo.common.GaussianInfo gaussian_info = 5;
+}
+
+// based on apollo.prediction.Trajectory
+message PredictionTrajectoryFeature {
+  optional double probability = 1;  // probability of this trajectory
+  repeated TrajectoryPointFeature trajectory_point = 2;
+}
+
+// based on apollo.prediction.PredictionObstacle
+message PredictionObstacleFeature {
+  optional double timestamp_sec = 1;  // GPS time in seconds
+  optional double predicted_period = 2;
+  optional apollo.prediction.ObstacleIntent intent = 3;
+  optional apollo.prediction.ObstaclePriority priority = 4;
+  optional bool is_static = 5 [default = false];
+
+  // can have multiple trajectories per obstacle
+  repeated PredictionTrajectoryFeature trajectory = 6;
 }
 
 message ObstacleFeature {
@@ -77,16 +147,19 @@ message ObstacleFeature {
   optional double width = 3;   // obstacle width.
   optional double height = 4;  // obstacle height.
   optional apollo.perception.PerceptionObstacle.Type type = 5;  // obstacle type
-  repeated ObstacleTrajectoryPoint obstacle_trajectory_point = 6;
+  repeated PerceptionObstacleFeature obstacle_trajectory_point = 6;
+  optional PredictionObstacleFeature obstacle_prediction = 7;
 }
 
-message RoutingResponseFeature {
-  repeated string lane_id = 1;
+message RoutingFeature {
+  repeated string routing_lane_id = 1;
+  repeated string local_routing_lane_id = 2;  // local routing close to ADC
 }
 
+// based on apollo.perception.TrafficLight
 message TrafficLightFeature {
-    optional string id = 1;
-    optional apollo.perception.TrafficLight.Color color = 2;
+  optional string id = 1;
+  optional apollo.perception.TrafficLight.Color color = 2;
 }
 
 message ADCTrajectoryPoint {
@@ -94,29 +167,38 @@ message ADCTrajectoryPoint {
   optional apollo.common.TrajectoryPoint trajectory_point = 2;
 }
 
+message LearningOutput {
+  repeated ADCTrajectoryPoint adc_future_trajectory_point = 1;
+}
+
 message LearningDataFrame {
   // localization message publishing time in seconds.
   optional double timestamp_sec = 1;
-
   optional uint32 frame_num = 2;
+  optional string map_name = 3;
+
+  optional PlanningTag planning_tag = 4;
 
   // Features from chassis
-  optional ChassisFeature chassis = 3;
+  optional ChassisFeature chassis = 5;
 
   // Features from localization
-  optional LocalizationFeature localization = 4;
+  optional LocalizationFeature localization = 6;
 
   // Features from perception obstacles
-  repeated ObstacleFeature obstacle = 5;
+  repeated ObstacleFeature obstacle = 7;
 
   // Features from routing
-  optional RoutingResponseFeature routing_response = 6;
+  optional RoutingFeature routing = 8;
 
   // Features from traffic_light_detection
-  repeated TrafficLightFeature traffic_light = 7;
+  repeated TrafficLightFeature traffic_light = 9;
 
-  // ADC ground-truth label trajectory
-  repeated ADCTrajectoryPoint adc_trajectory_point = 8;
+  // ADC past trajectory
+  repeated ADCTrajectoryPoint adc_trajectory_point = 10;
+
+  // Learning ouputs
+  optional LearningOutput output = 11;
 }
 
 message LearningData {

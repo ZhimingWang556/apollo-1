@@ -151,7 +151,9 @@ void EvaluatorManager::Init(const PredictionConf& config) {
           break;
         }
         case PerceptionObstacle::PEDESTRIAN: {
-          if (obstacle_conf.priority_type() == ObstaclePriority::CAUTION) {
+          if (FLAGS_prediction_offline_mode ==
+                  PredictionConstants::kDumpDataForLearning ||
+              obstacle_conf.priority_type() == ObstaclePriority::CAUTION) {
             pedestrian_evaluator_ = obstacle_conf.evaluator_type();
             break;
           }
@@ -189,7 +191,11 @@ Evaluator* EvaluatorManager::GetEvaluator(
 void EvaluatorManager::Run(ObstaclesContainer* obstacles_container) {
   if (FLAGS_enable_semantic_map ||
       FLAGS_prediction_offline_mode == PredictionConstants::kDumpFrameEnv) {
-    BuildObstacleIdHistoryMap(obstacles_container);
+    size_t max_num_frame = 10;
+    if (FLAGS_prediction_offline_mode == PredictionConstants::kDumpFrameEnv) {
+      max_num_frame = 20;
+    }
+    BuildObstacleIdHistoryMap(obstacles_container, max_num_frame);
     DumpCurrentFrameEnv(obstacles_container);
     if (FLAGS_prediction_offline_mode == PredictionConstants::kDumpFrameEnv) {
       return;
@@ -278,8 +284,10 @@ void EvaluatorManager::EvaluateObstacle(Obstacle* obstacle,
       break;
     }
     case PerceptionObstacle::PEDESTRIAN: {
-      if (obstacle->latest_feature().priority().priority() ==
-          ObstaclePriority::CAUTION) {
+      if (FLAGS_prediction_offline_mode ==
+              PredictionConstants::kDumpDataForLearning ||
+          obstacle->latest_feature().priority().priority() ==
+              ObstaclePriority::CAUTION) {
         evaluator = GetEvaluator(pedestrian_evaluator_);
         CHECK_NOTNULL(evaluator);
         evaluator->Evaluate(obstacle, obstacles_container);
@@ -304,7 +312,7 @@ void EvaluatorManager::EvaluateObstacle(
 }
 
 void EvaluatorManager::BuildObstacleIdHistoryMap(
-    ObstaclesContainer* obstacles_container) {
+    ObstaclesContainer* obstacles_container, size_t max_num_frame) {
   obstacle_id_history_map_.clear();
   std::vector<int> obstacle_ids =
       obstacles_container->curr_frame_movable_obstacle_ids();
@@ -315,7 +323,7 @@ void EvaluatorManager::BuildObstacleIdHistoryMap(
       continue;
     }
     size_t num_frames =
-        std::min(static_cast<size_t>(10), obstacle->history_size());
+        std::min(max_num_frame, obstacle->history_size());
     for (size_t i = 0; i < num_frames; ++i) {
       const Feature& obstacle_feature = obstacle->feature(i);
       Feature feature;

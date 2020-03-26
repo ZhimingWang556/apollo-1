@@ -26,6 +26,8 @@ namespace apollo {
 namespace routing {
 
 using apollo::common::ErrorCode;
+using apollo::common::PointENU;
+using apollo::hdmap::ParkingSpaceInfoConstPtr;
 
 std::string Routing::Name() const { return FLAGS_routing_node_name; }
 
@@ -144,6 +146,45 @@ double Routing::GetRoutingLength(const RoutingResponse& routing_response) {
   return length;
 }
 
+bool Routing::GetParkingID(const PointENU& parking_point,
+                           std::string* parking_space_id) {
+  // search current parking space id associated with parking point.
+  constexpr double kDistance = 0.01;  // meter
+  std::vector<ParkingSpaceInfoConstPtr> parking_spaces;
+  if (hdmap_->GetParkingSpaces(parking_point, kDistance, &parking_spaces) ==
+      0) {
+    *parking_space_id = parking_spaces.front()->id().id();
+    return true;
+  }
+  return false;
+}
+
+bool Routing::FillParkingID(RoutingResponse* routing_response) {
+  const auto& routing_request = routing_response->routing_request();
+  const bool has_parking_info = routing_request.has_parking_info();
+  const bool has_parking_id =
+      has_parking_info && routing_request.parking_info().has_parking_space_id();
+  // return early when has parking_id
+  if (has_parking_id) {
+    return true;
+  }
+  // set parking space ID when
+  //  has parking info && has parking point && NOT has parking space id && get
+  //  ID successfully
+  if (has_parking_info && routing_request.parking_info().has_parking_point()) {
+    const PointENU parking_point =
+        routing_request.parking_info().parking_point();
+    std::string parking_space_id;
+    if (GetParkingID(parking_point, &parking_space_id)) {
+      routing_response->mutable_routing_request()
+          ->mutable_parking_info()
+          ->set_parking_space_id(parking_space_id);
+      return true;
+    }
+  }
+  ADEBUG << "Failed to fill parking ID";
+  return false;
+}
 
 bool Routing::Process(const std::shared_ptr<RoutingRequest>& routing_request,
                       RoutingResponse* const routing_response) {
@@ -161,6 +202,7 @@ bool Routing::Process(const std::shared_ptr<RoutingRequest>& routing_request,
         min_routing_length = routing_length;
       }
     }
+    FillParkingID(routing_response);
   }
   if (min_routing_length < std::numeric_limits<double>::max()) {
     monitor_logger_buffer_.INFO("Routing success!");
